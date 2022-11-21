@@ -1,0 +1,313 @@
+---
+title: "Plots DEFENSIO"
+output: html_notebook
+---
+
+```{r, message = FALSE}
+library (readr)
+library (dplyr)
+library (text2vec)
+library (ggplot2)
+library (jtools)
+library (scales)
+library (dotwhisker)
+library (ggthemes)
+library (knitr)
+```
+
+################################################################################
+################  INDIVIDUALIZING FOUNDATION HYPOTHESE 1A
+################################################################################
+
+```{r}
+subreddits <- (c("LateStageCapitalism", "SandersForPresident", 
+                 "NeutralPolitics", "Conservative", "The_Donald"))
+subreddits <- factor(subreddits, 
+                     levels = c("LateStageCapitalism", "SandersForPresident", 
+                                "NeutralPolitics", "Conservative", "The_Donald"))
+coef <- c(0.38833, 0.35773, 0.4327, 0.41032, 0.3167)
+lb <- c(0.3857227, 0.3552646, 0.4303563, 0.4077069, 0.314352)
+ub <- c(0.3909402, 0.3601916, 0.4350424, 0.4129378, 0.3191095)
+pola <- factor(c("politisch links", "politisch links", "politisch neutral", 
+                 "politisch rechts", "politisch rechts"))
+tidy_indi_2 <- tibble(subreddits, coef, lb, ub, pola)
+```
+
+```{r}
+  ggplot(tidy_indi_2, aes (coef, subreddits, color = pola)) +
+                geom_point (aes (shape = pola), size = 2.5) + 
+                scale_y_discrete(" ", 
+                                 limits = c("LateStageCapitalism", 
+                                            "SandersForPresident", 
+                                            "NeutralPolitics", 
+                                            "Conservative", 
+                                            "The_Donald")) +
+                scale_x_continuous(" ", 
+                                   breaks=c(0.325, 0.35, 0.375, 0.40, 0.425),
+                                   labels=c(0.325, 0.35, 0.375, 0.40, 0.425)) +
+                scale_color_manual (name = "Politische Ausrichtung", 
+                                    values = c("coral","steelblue", "purple")) + 
+                scale_shape_manual (name = "Politische Ausrichtung", 
+                                    values = c(17, 19, 15)) + 
+                theme_hc () +
+                geom_errorbarh (aes (xmin = lb, xmax = ub), height = 0.2)
+
+ggsave("presentation_hyp1A.tiff", 
+       units="in", width=8, height=4, dpi=500, 
+       compression = 'lzw')
+```
+
+
+################################################################################
+################  BINDING FOUNDATION HYPOTHESE 1B
+################################################################################
+
+```{r}
+
+coef2 <- c(0.26816, 0.25251, 0.2892, 0.29187, 0.25104)
+lb2 <- c(0.26650, 0.25094, 0.28767, 0.29020, 0.24953)
+ub2 <- c(0.26982, 0.25407, 0.29064, 0.293535, 0.25255)
+
+tidy_bindi_2 <- tibble(subreddits, coef2, lb2, ub2, pola)
+```
+
+```{r}
+  ggplot(tidy_bindi_2, aes (coef2, subreddits, color = pola)) +
+                geom_point (aes (shape = pola), size = 2.5) + 
+                scale_y_discrete(" ", 
+                                 limits = c("LateStageCapitalism", 
+                                            "SandersForPresident", 
+                                            "NeutralPolitics", 
+                                            "Conservative", "The_Donald")) +
+                scale_x_continuous(" ", 
+                                   breaks=c(0.24, 0.25, 0.26, 0.27, 0.28, 0.29),
+                                   labels=c(0.24, 0.25, 0.26, 0.27, 0.28, 0.29)) +
+                scale_color_manual (name = "Politische Ausrichtung", 
+                                    values = c("coral","steelblue", "purple")) + 
+                scale_shape_manual (name = "Politische Ausrichtung", 
+                                    values = c(17, 19, 15)) + 
+                theme_hc () +
+                geom_errorbarh (aes (xmin = lb2, xmax = ub2), height = 0.2)
+
+ggsave("presentation_hyp1B.tiff", 
+       units="in", width=8, height=4, dpi=500, 
+       compression = 'lzw')
+```
+
+################################################################################
+################  COMBINATION H1
+################################################################################
+
+```{r}
+subreddits3 <- factor(c("LateStageCapitalism", "SandersForPresident", 
+                        "NeutralPolitics", "Conservative", "The_Donald",
+                 "LateStageCapitalism", "SandersForPresident", 
+                 "NeutralPolitics", "Conservative", "The_Donald"))
+
+coef3 <- c(0.38833, 0.35773, 0.4327, 0.41032, 0.3167, 0.26816, 0.25251, 0.2892, 
+           0.29187, 0.25104)
+lb3 <- c(0.3857227, 0.3552646, 0.4303563, 0.4077069, 0.314352, 0.26650, 0.25094, 
+         0.28767, 0.29020, 0.24953)
+ub3 <- c(0.3909402, 0.3601916, 0.4350424, 0.4129378, 0.3191095, 0.26982, 0.25407, 
+         0.29064, 0.293535, 0.25255)
+pola3 <- factor(c("politisch links", "politisch links", "politisch neutral", 
+                  "politisch rechts", "politisch rechts", 
+                 "politisch links", "politisch links", "politisch neutral", 
+                 "politisch rechts", "politisch rechts"))
+foundation <- c("Individualizing Foundation", "Individualizing Foundation", 
+                "Individualizing Foundation", 
+                "Individualizing Foundation", "Individualizing Foundation", 
+                "Binding Foundation", "Binding Foundation", "Binding Foundation", 
+                "Binding Foundation", "Binding Foundation")
+tidy_h1 <- tibble(subreddits3, coef3, lb3, ub3, pola3)
+```
+
+```{r}
+  ggplot(tidy_h1, aes (coef3, subreddits3, color = foundation)) +
+                geom_point (aes (shape = foundation), size = 2.5) + 
+                scale_y_discrete(" ", 
+                                 limits = c("LateStageCapitalism", 
+                                            "SandersForPresident", 
+                                            "NeutralPolitics", 
+                                            "Conservative", "The_Donald")) +
+                scale_x_continuous(" ", 
+                                   breaks=c(0.25, 0.275, 0.30, 0.325, 
+                                            0.35, 0.375, 0.40, 0.425),
+                                   labels=c(0.25, 0.275, 0.30, 0.325, 
+                                            0.35, 0.375, 0.40, 0.425)) +
+                scale_color_manual (name = "Moral Foundation", 
+                                    values = c("coral","steelblue")) + 
+                scale_shape_manual (name = "Moral Foundation", 
+                                    values = c(17, 19)) + 
+                theme_hc () +
+                geom_errorbarh (aes (xmin = lb3, xmax = ub3), height = 0.2)
+
+ggsave("presentation_hyp1both.tiff", 
+       units="in", width=8, height=4, dpi=500, 
+       compression = 'lzw')
+```
+
+
+################################################################################
+################  INDIVIDUALIZING FOUNDATION HYPOTHESE 2A
+################################################################################
+
+```{r}
+LateStageCapitalism <- function(x){0.39 - 0.014*x + 0.0072*x^2}
+SandersForPresident <- function(x){0.3571 - 0.009573*x + 0.01222*x^2}
+NeutralPolitics <- function(x){0.4364 - 0.0061*x}
+Conservative <- function(x){0.4132 - 0.01135*x + 0.001664*x^2}
+The_Donald <- function(x){0.3172 - 0.01082*x + 0.009497*x^2}
+
+
+df <- data.frame(x = rep(c(0,10), 5), 
+                 subreddit = c("LSC", "LSC",
+                               "SFP", "SFP",
+                               "NP", "NP",
+                               "CON", "CON",
+                               "TD", "TD"))
+
+df$subreddit <- factor(df$subreddit, 
+                       levels = c("LSC", "SFP", "NP", "CON", "TD"))
+```
+
+```{r}
+plot_h2a <- ggplot(df, aes(x, color = subreddit)) +
+
+              theme_hc() +
+  
+              stat_function(fun = LateStageCapitalism, 
+                            xlim = c(0, 2.83), 
+                            data = subset(df, subreddit == "LSC"), 
+                            size = 1) +
+              
+              stat_function(fun = SandersForPresident, 
+                            xlim = c(0, 4.53), 
+                            data = subset(df, subreddit == "SFP"), 
+                            size = 1) +
+              
+              stat_function(fun = NeutralPolitics, 
+                            xlim = c(0, 6.37), 
+                            data = subset(df, subreddit == "NP"), 
+                            size = 1) +
+              
+              stat_function(fun = Conservative, 
+                            xlim = c(0, 8.45), 
+                            data = subset(df, subreddit == "CON"), 
+                            size = 1) +
+              
+              stat_function(fun = The_Donald, 
+                            xlim = c(0, 2.697 ), 
+                            data = subset(df, subreddit == "TD"), 
+                            size = 1) +
+  
+              xlab("DAM (in Jahren)") +
+              ylab("Individualizing Foundation") +
+              
+              scale_y_continuous (breaks = c(0.30, 0.35, 0.40, 0.45, 0.50, 0.55), 
+                                 labels = c(0.30, 0.35, 0.40, 0.45, 0.50, 0.55),
+                                 limits = c(0.30, 0.55)) +
+              
+              scale_x_continuous (limits = c(0, 8.5),
+                                 labels = c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
+                                 breaks = c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)) +
+              
+              theme (text = element_text(face="bold", size=16),
+                     axis.title.x = element_text(
+                       margin = margin(t = 20, r = 0, b = 0, l = 0), 
+                       face="bold", size=16
+                       ),
+                     axis.title.y = element_text(
+                       margin = margin(t = 0, r = 20, b = 0, l = 20), 
+                       face="bold", size=16
+                       )
+                     ) +
+              scale_color_colorblind() 
+
+plot_h2a  
+ggsave("presentation_H2a.tiff", 
+       units="in", width=10, height=8, dpi=300, 
+       compression = 'lzw')
+```
+
+
+################################################################################
+################  BINDING FOUNDATION HYPOTHESE 2B
+################################################################################
+
+```{r}
+LateStageCapitalism <- function(x){0.2689 - 0.005154*x + 0.002676*x^2}
+SandersForPresident <- function(x){0.2506 + 0.002651*x + 0.004655*x^2}
+NeutralPolitics <- function(x){0.2909 - 0.00301*x}
+Conservative <- function(x){0.2931 - 0.004954*x + 0.0007487*x^2}
+The_Donald <- function(x){0.2507 - 0.001824*x + 0.002213*x^2}
+
+df2 <- data.frame(x = rep(c(0,10), 5), 
+                 subreddit =  c("LSC", "LSC",
+                               "SFP", "SFP",
+                               "NP", "NP",
+                               "CON", "CON",
+                               "TD", "TD")) 
+
+df2$subreddit <- factor(df$subreddit, 
+                        levels = c("LSC", "SFP", "NP", "CON", "TD"))
+
+plot_h2b <- ggplot(df2, aes(x, color = subreddit)) +
+
+              theme_hc() +
+  
+              stat_function(fun = LateStageCapitalism, 
+                            xlim = c(0, 2.83), 
+                            data = subset(df2, subreddit == "LSC"), 
+                            size = 1) +
+              
+              stat_function(fun = SandersForPresident, 
+                            xlim = c(0, 4.53), 
+                            data = subset(df2, subreddit == "SFP"), 
+                            size = 1) +
+              
+              stat_function(fun = NeutralPolitics, 
+                            xlim = c(0, 6.37), 
+                            data = subset(df2, subreddit == "NP"), 
+                            size = 1) +
+              
+              stat_function(fun = Conservative, 
+                            xlim = c(0, 8.45), 
+                            data = subset(df2, subreddit == "CON"), 
+                            size = 1) +
+              
+              stat_function(fun = The_Donald, 
+                            xlim = c(0, 2.697 ), 
+                            data = subset(df2, subreddit == "TD"), 
+                            size = 1) +
+  
+              xlab("DAM (in Jahren)") +
+              ylab("Binding Foundation") +
+              
+              scale_y_continuous (breaks = c(0.225, 0.25, 0.275, 
+                                             0.30, 0.325, 0.35, 0.375), 
+                                  labels = c(0.225, 0.25, 0.275, 
+                                             0.30, 0.325, 0.35, 0.375),
+                                  limits = c(0.225, 0.375)) +
+  
+              scale_x_continuous (limits = c(0, 8.5),
+                                  labels = c(1, 2, 3, 4, 5, 6, 7, 8, 9),
+                                  breaks = c(1, 2, 3, 4, 5, 6, 7, 8, 9)) +
+              
+              theme (text = element_text(face="bold", size=16),
+                     axis.title.x = element_text(
+                       margin = margin(t = 20, r = 0, b = 0, l = 0), 
+                       face="bold", size=16
+                       ),
+                     axis.title.y = element_text(
+                       margin = margin(t = 0, r = 20, b = 0, l = 20), 
+                       face="bold", size=16
+                       )
+                     ) +
+              scale_color_colorblind() 
+
+plot_h2b  
+ggsave("presentation_H2b.tiff", 
+       units="in", width=10, height=8, dpi=300, 
+       compression = 'lzw')
+```

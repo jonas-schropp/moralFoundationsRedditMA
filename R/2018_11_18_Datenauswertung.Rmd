@@ -1,0 +1,1050 @@
+---
+title: "Datenauswertung"
+author: "Jonas Schropp"
+date: "25 November 2018"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Benötigte Pakete:
+
+```{r, message = FALSE}
+library (dplyr)     # Datenbereinigung
+library (readr)     # Einlesen und Schreiben der Daten
+library (tidyr)     # Datenbereinigung
+library (ggplot2)   # Visualisierungen
+library (stringr)   # Generelle Textverarbeitung
+library (tidytext)  # Generelle Textverarbeitung
+library (text2vec)  # GloVe-Modellierung
+library (lexicon)   # Stoppwörter
+library (lme4)      # Mixed-Effects Modeling
+library (caret)     # Datenstransformation
+library (sjstats)   # Statistiken für Mixed-Effects Model
+library (multcomp)  # Paarweise Vergleiche für Mixed-Effects ANOVA
+library (nloptr)    # Optimierung für Mixed-Effects Modeling
+library (lmerTest)  # p-Werte für Mixed-Effects Models
+library (BBmisc)    # POMS-Standardisierung
+library (quanteda)  # Generelle Textverarbeitung
+library (lubridate) # Daten und Zeiträume
+library (knitr)     # Formatierung des Dokuments
+```
+
+## Datenbereinigung (I)
+
+Datensatz einlesen:
+```{r, eval = FALSE, message = FALSE}
+reddit_df <- read_rds(file.choose())
+```
+
+Im Datensatz erfasste Variablen:  
+
+ * subreddit: Der Name des Subreddits, in dem gepostet wurde.
+ * author: Der Username des jeweiligen Verfassers eines Posts
+ * created_utc: Der Zeitpunkt, zu dem ein Post verfasst wurde (in Sekunden seit 01.01.1970)
+ * body: Der Kommentar in Textform  
+  
+Einige der Kommentare und Autoren wurden nachträglich gelöscht. Leider ist es nicht möglich, festzustellen, ob diese _at random_ entfernt wurden, oder beispielsweise aufgrund von Regelverletzungen.  
+Am einfachsten lassen sich die Kommentare mit _dplyr_ entfernen:
+```{r, eval = FALSE}
+reddit_df <- reddit_df %>% 
+  filter (body != "[removed]",
+          author != "[deleted]",
+          body != "[deleted]")
+```
+
+Einige der Kommentare innerhalb der _Subreddits_ stammen nicht von echten Autoren, sondern von Programmen, meist mit bestimmten Aufgaben (z.B. das Korrigieren von Rechtschreibfehlern, oder die automatische Moderation von Kommentaren). Während es nicht möglich ist, mit absoluter Sicherheit festzustellen, welche Kommentare von echten Menschen verfasst wurden und welche nicht, kann zumindest der jeweilige _Automoderator_ entfernt werden, sowie Autoren deren Namen _bot_ oder _Bot_ beinhaltet.  
+
+In diesem Schritt können auch die Autoren entfernt werden, welche nicht mindestens vier verschiedene Posts verfasst haben (vgl. Nonneke & Preece, 2000), um nur regelmäßige Poster im Datensatz zu behalten.  
+
+Dafür werden zuerst alle Autoren in einen eigenen Datensatz überführt, der sowohl deren Usernamen, als auch die Anzahl an Posts des Autoren enthÃ¤lt.  
+```{r, eval = FALSE}
+author_count <- reddit_df %>%
+  group_by(subreddit) %>%
+  count(author) 
+
+reddit_df <- left_join(reddit_df, author_count, on = c("subreddit", "author"))
+
+bots <- str_subset(reddit_df$author, 'bot')
+Bots <- str_subset(reddit_df$author, 'Bot')
+reddit_df_bots <- reddit_df$author %in% bots | reddit_df$author %in% Bots
+
+reddit_df_not_bots <- reddit_df$author[!reddit_df_bots]
+
+reddit_df <- reddit_df %>%
+  filter(author %in% reddit_df_not_bots,
+         n >= 4,
+         author != "AutoModerator")
+```
+
+## GloVe-Modell
+
+Anhand dieses vorlÃ¤ufig bereinigten Datensatzes von 31,674,175 Kommentaren kann das GloVe-Modell (Pennington et al., 2014) berechnet werden, das daraufhin zur Kodierung der Kommentare eingesetzt wird. Dieses wird frühzeitig berechnet, um eine möglichst große Zahl an Kommentaren einbeziehen zu können. Bis jetzt gibt es keine klaren Erkenntnisse, wie viele Texte/Worte mindestens notwendig sind, um sinntragende Wort-Vektor Repräsentationen zu erhalten, daher empfielt es sich, das Modell an einem möglichst großen Korpus zu trainieren.  
+
+Dafür wird in einem ersten Schritt jedem Kommentar eine ID (Variablenname: _comment\_id_) zugeteilt:  
+```{r, eval = FALSE}
+reddit_df$comment_id <- 1:ncol(reddit_df)
+```
+
+Daraufhin wird eine Liste mit Stoppwörtern (Wörter, die bei der Textverarbeitung nicht beachtet werden, da sie sehr häufig auftreten und keine Relevanz für die Erfassung des Dokumentinhalts besitzen, z.B. "and", "the", oder "of") erstellt, um die Worteinbettungen zu verbessern. Diese Liste basiert auf der Stoppwortliste _sw\_loughran\_mcdonald\_long_, die im Paket _lexicon_ zur Verfügung steht (Loughran & McDonald, 2016) und in der automatisierten Textverarbeitung weite Verbreitung gefunden hat. Dieses Verfahren führte bereits bei anderen Studien zu besseren Ergebnissen des GloVe-Modells (Lison & Kutuzov, 2017). Nicht miteinbezogen wurden Personalpronomen, da diese möglicherweise eine Orientierung von Kommentaren hin zur Ingroup oder Outgroup repräsentieren können.
+```{r, eval = FALSE}
+contractions <- c("i'm", "we're", "you're", "they're", "he's", "she's", "it's", 
+                  "i've", "we've", "you've", "they've",
+                  "i'd", "we'd", "you'd", "they'd", "he'd", "she'd", "it'd",
+                  "i'll", "we'll", "you'll", "they'll", "he'll", "she'll", "it'll")
+
+pronouns <- tolower(c(pos_df_pronouns$pronoun, contractions)) 
+
+stopwords <- tolower(setdiff(sw_loughran_mcdonald_long, pronouns))
+```
+
+Die Berechnung der Wort-Vektoren erfolgt mit dem R-Paket _text2vec 0.5.1_ (Selivanov, 2018).  
+
+Im ersten Schritt wird eine Iterator-Funktion erstellt, die den Textkorpus Stückweise bearbeitet. 
+```{r, eval = FALSE}
+it <- itoken(iterable = reddit_df$body,
+             ids = reddit_df$comment_id,
+             preprocessor = tolower,
+             tokenizer = word_tokenizer,
+             n_chunks = 500)
+```
+
+Iterativ wird das Vokabular der untersuchten Texte zusammengefasst und von den Stoppwörtern bereinigt. Daraufhin werden Worte aus dem Vokabular entfernt, die nicht mindestens 25 mal im gesamten Datensatz vorkommen. Dieser Schritt dient dem Entfernen von seltenen Ausdrücken, deren Bedeutung aufgrund dessen nicht adäquat abgebildet werden kann. Darüber hinaus können so falsch geschriebene Worte, Weblinks und Ähnliches ausgeschlossen werden. Wie häufig ein Wort vorkommen muss, um bedeutungstragende Worteinbettungen zu berechnen, hängt vom individuellen Datensatz ab, wobei die Zahl meist zwischen 10 und 100 liegt (Lison & Kutuzov, 2017).   
+```{r, eval = FALSE}
+vocab <- create_vocabulary(it, stopwords = stopwords)
+
+pruned_vocab <- prune_vocabulary(vocab, term_count_min = 25L)
+```
+
+Das so entstandene Vokabular von 2,897,705 Worten verringert sich durch diesen Schritt auf 122,072 einzelne Worte.  
+
+Aus dem auf diese Weise bereinigten und vectorisierten Vokabular wird eine dünnbesetzte _Term-Dokument-Matrix (TCM)_ erstellt. Bei der Erstellung werden symmetrisch 10 Worte vor und nach dem betrefflichen Ausdruck miteinbezogen. Nach Goldberg (2016) führen größere Fenster zu Worteinbettungen, die bessere Ergebnisse in Wortanalogie Aufgeben erzielen, wobei verhältnismäßig kleinere Fenster Wortähnlichkeiten besser abbilden können. Das hier verwendete Fenster von 10 Unigrammen bezieht einen möglichst grooßen Teil des jeweiligen Kommentars mit ein und entspricht der Fenstergröße, die bei Lison und Kutuzov (2017) in einem vergleichbaren Datensatz die besten Ergebnisse im Wortanalogietest erzielte.  
+```{r, eval = FALSE}
+reddit_tcm <- create_tcm(it, 
+                         vectorizer, 
+                         skip_grams_window = 10L,
+                         skip_grams_window_context = c("symmetric"))
+```
+
+Anhand dieser TCM kann daraufhin das GloVe-Modell berechnet werden. Entsprechend der Originalstudie von Pennington et al. (2014) basiert das Modell auf 50 Iterationen mit einem x_max von 100, sowie einer Vektorenlänge von 100.
+```{r, eval = FALSE}
+glove_model <- GlobalVectors$new(word_vectors_size = 100L,
+                                 vocabulary = pruned_vocab,
+                                 x_max = 100L)
+```
+
+```{r, eval = FALSE}
+vectors_main <- glove_model$fit_transform(reddit_tcm, n_iter = 50)
+```
+
+Die für die Kodierung verwendeten Wort-Vektoren basieren entsprechend der Empfehlungen von Pennington et al. (2014) auf den aggregierten Haupt- und Komponentenvektoren.
+```{r, eval = FALSE}
+vectors_components <- glove_model$components
+```
+
+```{r, eval = FALSE}
+reddit_glove_vectors = (vectors_main + t(vectors_components))
+```
+
+Die Qualität der so ermittelten Wortvektoren kann anhand der Analogiefragen von Mikolov et al. (2013) abgeschätzt werden.
+```{r, eval = FALSE}
+model_word_set <- pruned_vocab$term
+```
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+setwd ("~/MASTERARBEIT/Daten_Masterarbeit/Dictionary Creation")
+load ("2018_10_26_full_GloVe_model.RData")
+rm(pruned_vocab, reddit_tcm, vectors_components, vectors_main)
+```
+
+```{r, warning = FALSE}
+setwd ("~/MASTERARBEIT/Daten_Masterarbeit/Dictionary Creation")
+
+questions_file <- ('questions-words.txt')
+qlst <- prepare_analogy_questions(questions_file, model_word_set)
+res <- check_analogy_accuracy(questions_list = qlst, 
+                              m_word_vectors = reddit_glove_vectors)
+```
+
+```{r, echo = FALSE, message = FALSE}
+rm(model_word_set, reddit_glove_vectors)
+```
+
+Das Ergebnis von ~48% richtig beantworteten Aufgaben liegt in einem Ähnlichen Bereich, wie bei anderen vergleichbaren GloVe-Modellen (vgl. Lison & Kutuzov, 2017).
+
+## Datenbereinigung (II)
+
+Im nächsten Schritt werden Autoren entfernt, die in mehr als einem der untersuchten Subreddits Kommentare verfasst haben, um Verfälschungen in der Auswertung zu vermeiden. 
+```{r, eval = FALSE}
+TD_authors <- reddit_df %>% 
+  filter (subreddit == "The_Donald") %>%  
+  distinct(author)
+CON_authors <- reddit_df %>% 
+  filter (subreddit == "Conservative") %>% 
+  distinct(author)
+NP_authors <- reddit_df %>% 
+  filter (subreddit == "NeutralPolitics") %>% 
+  distinct(author)
+SFP_authors <- reddit_df %>% 
+  filter (subreddit == "SandersForPresident") %>% 
+  distinct(author)
+LSC_authors <- reddit_df %>% 
+  filter (subreddit == "LateStageCapitalism") %>% 
+  distinct(author)
+
+TD_CON <- intersect(TD_authors, CON_authors)
+TD_NP <- intersect(TD_authors, NP_authors)
+TD_SFP <- intersect(TD_authors, SFP_authors)
+TD_LSC <- intersect(TD_authors, LSC_authors)
+CON_NP <- intersect(CON_authors, NP_authors)
+CON_SFP <- intersect(CON_authors, SFP_authors)
+CON_LSC <- intersect(CON_authors, LSC_authors)
+NP_SFP <- intersect(NP_authors, SFP_authors)
+NP_LSC <- intersect(NP_authors, LSC_authors)
+SFP_LSC <- intersect(SFP_authors, LSC_authors)
+
+non_unique_authors <- TD_CON %>%
+  union (TD_NP) %>%
+  union (TD_SFP) %>%
+  union (TD_LSC) %>%
+  union (CON_NP) %>%
+  union (CON_SFP) %>%
+  union (CON_LSC) %>%
+  union (NP_SFP) %>%
+  union (NP_LSC) %>%
+  union (SFP_LSC) 
+```
+
+```{r, eval = FALSE}
+reddit_df <- anti_join(reddit_df, non_unique_authors, by = "author")
+```
+
+Nach diesem Schritt enthält der Datensatz noch 21,939,071 Kommentare.
+
+## Distributed Dictionary Representations (DDR)
+
+Die Kodierung der Kommentare erfolgt mit der __Distributed Dictionary Representations (DDR)__ Methode von Garten et al. (2018). Zuerst werden Konzeptrepräsentationen erstellt, daraufhin wird deren Kosinus-Ähnlichkeit mit den aggregierten Kommentarvektoren berechnet.
+
+### Konzeptrepräsentationen
+
+Als Konzeptrepräsentationen werden die aggregierten Vektoren der "wichtigsten" Worte, sogenannter _seed words_ aus dem _Moral Foundations Dictionary_ (Graham et al., 2009) bezeichnet. Diese wurden vollständig aus der Studie von Garten et al. (2018) entnommen. Zur Berechnung dieser Vektoren wird die folgende Funktion definiert:
+```{r, eval = FALSE}
+make_concept_rep <- function(model, seed_vec) {
+  ## model: pretrained GloVe or word2vec word embeddings
+  ## seed_vec: a vector of seed words for querying and aggregating
+  
+  concept_vec <- double(length = 100L)
+  
+  for (word in seed_vec){
+    
+    concept_vec <- concept_vec + as.double (model[word, , drop = FALSE])
+    
+  }
+  return (concept_vec)
+}
+```
+
+Daraufhin werden die _seed words_ als Vektoren definiert und in die Funktion _make\_concept\_rep_ eingesetzt:
+```{r, eval = FALSE}
+seed_words_individualizing <- c("kindness", "compassion", "nurture", "empathy",
+                                "suffer", "cruel", "hurt", "harm",
+                                "fairness", "equality", "justice", "rights", 
+                                "cheat", "fraud", "unfair", "injustice")
+  
+seed_words_binding <- c("authority", "obey", "respect", "tradition", 
+                        "subversion", "disobey", "disrespect", "chaos",
+                        "loyal", "solidarity", "patriot", "fidelity",
+                        "betray", "treason", "disloyal", "traitor",
+                        "purity", "sanctity", "sacred", "wholesome",
+                        "impurity", "depravity", "degradation", "unnatural")
+```
+
+```{r, eval = FALSE}
+individualizing_foundation <- make_concept_rep (model = reddit_glove_vectors,
+                                                seed_vec = seed_words_individualizing)
+
+binding_foundation <- make_concept_rep (model = reddit_glove_vectors,
+                                        seed_vec = seed_words_binding)
+```
+
+### Kodierung der Kommentare
+
+Im ersten Schritt wird den Kommentaren eine (neue) individuelle ID zugewiesen.
+```{r, eval = FALSE}
+reddit_df$comment_id <- 1:21939071
+```
+
+Daraufhin wird eine Iteratorfunktion definiert, um aus den Kommentaren iterativ in eine _Document-Term Matrix_ herzustellen.
+```{r, eval = FALSE}
+it <- itoken(iterable = reddit_df$body,
+             ids = reddit_df$comment_id,
+             preprocessor = tolower,
+             tokenizer = word_tokenizer,
+             n_chunks = 500)
+```
+
+Die kodierten Werte sollen ausschließlich auf den Worten basieren, die auch in dem zuvor berechneten GloVe-Modell vorkommen.  
+```{r, eval = FALSE}
+vectorizer <- vocab_vectorizer(pruned_vocab)
+```
+
+```{r, eval = FALSE}
+dtm = create_dtm(it, vectorizer)
+dtm = normalize(dtm)
+```
+
+Um die so repräsentierten Kommentare im Vektorraum zu repräsentieren, werden die Wortvektoren über die normalisierten Kommentare summiert.  
+```{r, eval = FALSE}
+document_vecs = dtm%*%reddit_glove_vectors
+```
+
+In einem letzten Schritt kann nun die Kosinus-Ähnlichkeit zwischen Kommentaren und Konzeptrepräsentationen berechnet werden.
+```{r, eval = FALSE}
+reddit_df$individualizing_foundation <- sim2(document_vecs, individualizing_foundation)
+reddit_df$binding_foundation <- sim2(document_vecs, binding_foundation)
+```
+
+Kommentare, die keine einziges Wort enthalten, das im GloVe-Modell vorkommt, werden entfernt, da sie mit einer Kodierung von 0 das Ergebnis verzerren würden.
+```{r, eval = FALSE}
+reddit_df <- reddit_df %>%
+  filter (individualizing_foundation != 0 | binding_foundation != 0)
+```
+
+## Datenbereinigung (III)
+
+Da den abhängigen Variablen _individualizing\_foundation_ und _binding\_foundation_ keine intrinisische, bedeutsame Skalierung zueigen ist, können diese Variablen transformiert werden, um etwaige Probleme mit der Nicht-Normalität und Heteroskedastizität der Residuen vorzubeugen.  
+
+Für eine BoxCox-Transformation müssen alle Werte der Variablen positiv (und idealerweise über 1) sein, daher wird zu den Kosinus-Ähnlichkeiten eine Konstante addiert.
+```{r, eval = FALSE}
+reddit_df <- reddit_df %>% 
+  mutate (author = factor(author),
+          individualizing_foundation = individualizing_foundation + 2,
+          binding_foundation = binding_foundation + 2) 
+```
+
+Daraufhin werden die Werte für Lambda experimentell bestimmt. Für _individualizing\_foundation_ ergab sich ein Lambda von 9.4, für _binding\_foundation_ ein Lambda von 8.5.
+```{r, eval = FALSE}
+ind_trans <- BoxCoxTrans(reddit_df$individualizing_foundation, 
+                         lambda = seq(0, 20, 1/10))
+
+bind_trans <- BoxCoxTrans(reddit_df$binding_foundation, 
+                          lambda = seq(0, 20, 1/10))
+
+reddit_df <- cbind(reddit_df, 
+                   trans_individualizing = predict(ind_trans, 
+                                                   reddit_df$individualizing_foundation))
+
+reddit_df <- cbind(reddit_df, 
+                   trans_binding = predict(bind_trans, 
+                                           reddit_df$binding_foundation))
+```
+
+Z-Standardisierte Betas für längsschnittliche Untersuchungen bringen eine Reihe von Problemen mit sich (siehe Moeller, 2015). Daher empfehlen die Autoren eine _Proportion of Maximum Variance Skalierung (POMS)_, auch _Min-Max Skalierung_ genannt. Diese ermöglicht eine bessere Vergleichbarkeit der Koeffizienten und ist im Paket _BBmisc_ verfügbar.
+
+POMS = [(observed - minimum)/(maximum - minimum)]
+```{r, eval = FALSE}
+reddit_df$individualizing <- normalize(reddit_df$trans_individualizing, 
+                                       method = "range", range = c(0, 1))
+
+reddit_df$binding <- normalize(reddit_df$trans_binding, 
+                               method = "range", range = c(0, 1))
+```
+
+Um die unabhängige Variable _timediff_ zu berechnen, wird für jeden individuellen Autoren der Zeitpunkt des Ersten Kommentars (im UTF-Format) vom Zeitpunkt jedes weiteren Posts abgezogen. Dieser Wert repräsentiert dann die Zeit, seit der ein Autor aktiv an der Konversation in einem Subreddit beteiligt ist.  
+```{r, eval = FALSE}
+min_by_authors <- reddit_df %>%
+  group_by (author) %>%
+  summarize (min_time = min(created_utc))
+
+reddit_df <- reddit_df %>%
+  left_join(min_by_authors) %>%
+  mutate (timediff = created_utc - min_time)
+```
+
+Da die Einheit von _timediff_ (Sekunden) zu klein ist, um bedeutungsvolle psychische Veränderungen feststellen zu können, wird der Wert jeweils durch 31,557,600 geteilt, so dass _timediff_ in Jahren angegeben wird.
+```{r, eval = FALSE}
+reddit_df$timediff <- reddit_df$timediff / 31557600 
+```
+
+Für die Deskriptiven Statistiken wird darüber hinaus die Anzahl an Worten pro Kommentar gezählt.
+```{r, eval = FALSE}
+reddit_corpus <- corpus(reddit_df, docid_field = "comment_id", text_field = "body")
+
+reddit_df$wordno <- ntoken(reddit_corpus, remove_numbers = TRUE, remove_punct = TRUE)
+```
+
+## Deskriptive Statistiken
+```{r, eval = FALSE}
+reddit_df <- reddit_df %>%
+  mutate (created = as_datetime(created_utc),
+          author = factor(author),
+          subreddit = factor(subreddit))%>% 
+  dplyr::select (author, timediff, created_utc, subreddit, 
+                 individualizing, binding, wordno) 
+
+```
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+setwd("C:/Users/Jonas Schropp/Desktop/Datenauswertung")
+load("2019_11_20_Deskriptive_Statistiken.RData")
+reddit_df <- read_rds("2018_11_20_Datensatz_vollständig.RDS")
+```
+
+Überblick über den vollständigen Datensatz:
+```{r}
+glimpse(reddit_df)
+```
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+rm(reddit_df)
+```
+
+Die Deskriptiven Statistiken können auf zwei Ebenen getrennt werden - einerseits auf der Ebene der Autoren und andererseits auf der Ebene der Kommentare.
+```{r, eval = FALSE}
+desc_df <- reddit_df %>%
+  group_by (subreddit, author) %>%
+  summarize (n_comments = n(),
+             individualizing = mean(individualizing),
+             binding = mean(binding))
+
+descriptives_authors1 <- desc_df %>% 
+                            summarise(
+                                 N_authors = n_distinct(author, na.rm = TRUE),
+                              # number of comments
+                                  max_comments = max(n_comments, na.rm = TRUE),
+                                  min_comments = min(n_comments, na.rm = TRUE),
+                                  mean_comments = mean(n_comments, na.rm = TRUE),
+                                  sd_comments = sd(n_comments, na.rm = TRUE),
+                                  median_comments = median(n_comments, na.rm = TRUE),
+                              # individualizing_foundation
+                                  max_individ = max(individualizing, na.rm = TRUE),
+                                  min_individ = min(individualizing, na.rm = TRUE),
+                                  mean_individ = mean(individualizing, na.rm = TRUE),
+                                  sd_individ = sd(individualizing, na.rm = TRUE),
+                                  median_individ = median(individualizing, na.rm = TRUE),
+                              # binding_foundation
+                                  max_binding = max(binding, na.rm = TRUE),
+                                  min_binding = min(binding, na.rm = TRUE),
+                                  mean_binding = mean(binding, na.rm = TRUE),
+                                  sd_binding = sd(binding, na.rm = TRUE),
+                                  median_binding = median(binding, na.rm = TRUE),
+                              # timespan
+                                  max_timespan = max(timespan, na.rm = TRUE),
+                                  min_timespan = min(timespan, na.rm = TRUE),
+                                  mean_timespan = mean(timespan, na.rm = TRUE),
+                                  sd_timespan = sd(timespan, na.rm = TRUE),
+                                  median_timespan = median(timespan, na.rm = TRUE)
+    )
+
+descriptives_authors2 <- desc_df %>% 
+                            group_by(subreddit) %>%
+                            summarise(
+                                N_authors = n_distinct(author, na.rm = TRUE),
+                            # number of comments    
+                                max_comments = max(n_comments, na.rm = TRUE),
+                                min_comments = min(n_comments, na.rm = TRUE),
+                                sd_comments = sd(n_comments, na.rm = TRUE),
+                                mean_comments = mean(n_comments, na.rm = TRUE),
+                                median_comments = median(n_comments, na.rm = TRUE),
+                            # individualizing_foundation
+                                max_individ = max(individualizing, na.rm = TRUE),
+                                min_individ = min(individualizing, na.rm = TRUE),
+                                mean_individ = mean(individualizing, na.rm = TRUE),
+                                sd_individ = sd(individualizing, na.rm = TRUE),
+                                median_individ = median(individualizing, na.rm = TRUE),
+                            # binding_foundation
+                                max_binding = max(binding, na.rm = TRUE),
+                                min_binding = min(binding, na.rm = TRUE),
+                                mean_binding = mean(binding, na.rm = TRUE),
+                                sd_binding = sd(binding, na.rm = TRUE),
+                                median_binding = median(binding, na.rm = TRUE),
+                              # timespan
+                                max_timespan = max(timespan, na.rm = TRUE),
+                                min_timespan = min(timespan, na.rm = TRUE),
+                                mean_timespan = mean(timespan, na.rm = TRUE),
+                                sd_timespan = sd(timespan, na.rm = TRUE),
+                                median_timespan = median(timespan, na.rm = TRUE)
+    )
+```
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+setwd("C:/Users/Jonas Schropp/Desktop/Datenauswertung")
+desc_df <- read_rds("2018_11_20_desc_df.RDS")
+```
+
+Überblick über den innerhalb der Autoren gemittelten Datensatz:
+```{r}
+glimpse(desc_df)
+```
+
+```{r, echo = FALSE, message = FALSE}
+rm(desc_df)
+```
+
+```{r, eval = FALSE}
+correlations <- cor(desc_df$individualizing, desc_df$binding)
+```
+
+```{r}
+correlations
+```
+
+Für den gesamten Datensatz:
+```{r, results='asis'}
+kable(descriptives_authors1[ ,1])
+kable(descriptives_authors1[ ,2:6])
+kable(descriptives_authors1[ ,7:11])
+kable(descriptives_authors1[ ,12:16])
+kable(descriptives_authors1[ ,17:21])
+```
+
+Aufgeteilt nach Subreddits:
+```{r, results='asis'}
+kable(descriptives_authors2[ ,c(1, 2)])
+kable(descriptives_authors2[ ,c(1, 3:7)])
+kable(descriptives_authors2[ ,c(1, 8:12)])
+kable(descriptives_authors2[ ,c(1, 13:17)])
+kable(descriptives_authors2[ ,c(1, 18:22)])
+```
+
+```{r, eval = FALSE}
+descriptives_comments1 <- reddit_df %>%
+                              summarize(
+                                  max_created = max(created),
+                                  min_created = min(created),
+                                  max_wordno = max(wordno),
+                                  min_wordno = min(wordno),
+                                  mean_wordno = mean(wordno),
+                                  median_wordno = median(wordno),
+                                  sd_wordno = sd(wordno)
+                              )
+                                  
+descriptives_comments2 <- reddit_df %>%
+                              group_by(subreddit) %>%
+                              summarize(
+                                  max_created = max(created),
+                                  min_created = min(created),
+                                  max_wordno = max(wordno),
+                                  min_wordno = min(wordno),
+                                  mean_wordno = mean(wordno),
+                                  median_wordno = median(wordno),
+                                  sd_wordno = sd(wordno)
+                              )                               
+                                  
+```
+
+Für den gesamten Datensatz:
+```{r, results='asis'}
+kable(descriptives_comments1[, 1:2])
+kable(descriptives_comments1[, 3:7])
+```
+
+Aufgeteilt nach subreddits:
+```{r, results='asis'}
+kable(descriptives_comments2[, c(1, 2:3)])
+kable(descriptives_comments2[, c(1, 4:8)])
+```
+
+## Hypothesentestung
+
+Für die Hypothesen 1a) und 1b) wird jeweils eine Mixed-Effects ANOVA gerechnet, für 2a) und 2b) jeweils der Übersichtlichkeit halber eine Mixed-Effects Regression pro Subreddit.  
+
+Es wird eine Optimierungsfunktion für die Auswertung mit _lme4_ definiert, um die Berechnung zu beschleunigen.  
+```{r, eval = FALSE}
+nlopt <- function(par, fn, lower, upper, control) {
+    .nloptr <<- res <- nloptr(par, fn, lb = lower, ub = upper, 
+        opts = list(algorithm = "NLOPT_LN_BOBYQA", print_level = 1,
+        maxeval = 1000, xtol_abs = 1e-6, ftol_abs = 1e-6))
+    list(par = res$solution,
+         fval = res$objective,
+         conv = if (res$status > 0) 0 else res$status,
+         message = res$message
+    )
+}
+```
+
+### Hypothese 1a)
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+setwd("C:/Users/Jonas Schropp/Desktop/Datenauswertung")
+load("Ergebnisse_Hypothese_1.RData")
+load("2018_11_21_Hypothese2_Ergebnisse.RData")
+load("2018_11_26_Ergänzungen_Datenauswertung.RData")
+load("Hypothese_2_model_comparisons.RData")
+load("Ergebnisse_Hypothese_2a_POLY.RData")
+load("Ergebnisse_Hypothese_2b_POLY.RData")
+```
+
+```{r, eval = FALSE}
+reddit_df$subreddit <- relevel(reddit_df$subreddit, "NeutralPolitics")
+```
+
+Hypothese: Die moralischen Werte der Individualizing Foundation sind in den Gruppen des linken politischen Spektrums höher, als in denen des rechten politischen Spektrums.  
+
+Spezifizierung des Modells und der paarweisen Vergleiche:
+```{r, eval = FALSE}
+hyp_1a <- lmer(individualizing ~ subreddit + (1 | author), data = reddit_df,
+               control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+base_1a <- lmer(individualizing ~ 1 + (1 | author), data = reddit_df, REML = FALSE,
+                control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+upd_1a <- lmer(individualizing ~ subreddit + (1 | author), data = reddit_df, REML = FALSE,
+               control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+comparison_h1a <- kable(anova(base_1a, upd_1a))
+
+contr_h1a <- glht(hyp_1a, linfct=mcp(subreddit="Tukey"))
+
+summary_hyp_1a <- summary(hyp_1a)
+
+confint_h1a <- kable(confint.merMod(hyp_1a, method = "Wald", level = 0.99))
+
+anova_h1a <- kable(anova(hyp_1a))
+
+rsq_1a <- r2(hyp_1a)
+```
+
+Vergleich mit Basismodell:
+```{r}
+comparison_h1a
+```
+
+Ergebnisse:
+```{r}
+summary_hyp_1a
+```
+
+Die Konfidenzintervalle der Effekte werden mit der Wald-Methode berechnet:
+```{r}
+confint_h1a
+```
+
+Die Kennzahlen der ANOVA können so angezeigt werden:
+```{r}
+anova_h1a
+rsq_1a
+```
+
+Paarweise Vergleiche mit einem Tukey-Test:
+```{r}
+summary(contr_h1a, test = adjusted("bonferroni"))
+confint(contr_h1a, level = 0.99)
+```
+
+### Hypothese 1b)
+
+Hypothese: Die moralischen Werte der Binding Foundation sind in den Gruppen des rechten politischen Spektrums höher, als in denen des linken politischen Spektrums.
+
+Spezifizierung des Modells und der paarweisen Vergleiche:
+```{r, eval = FALSE}
+hyp_1b <- lmer (binding ~ subreddit + (1 | author), data = reddit_df,
+                control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+base_1b <- lmer(binding ~ 1 + (1 | author), data = reddit_df, REML = FALSE,
+                control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+upd_1b <- lmer(binding ~ subreddit + (1 | author), data = reddit_df, REML = FALSE,
+               control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+comparison_h1b <- kable(anova(base_1b, upd_1b))
+
+contr_h1b <- glht(hyp_1b, linfct=mcp(subreddit="Tukey"))
+
+summary_hyp_1b <- summary(hyp_1b)
+
+confint_h1b <- kable(confint.merMod(hyp_1b, method = "Wald", level = 0.99))
+
+anova_h1b <- kable(anova(hyp_1b))
+
+rsq_1b <- r2(hyp_1b)
+```
+
+Vergleich mit Basismodell:
+```{r}
+comparison_h1b
+```
+
+Ergebnisse:
+```{r}
+summary_hyp_1b
+```
+
+Die Konfidenzintervalle der Effekte werden mit der Wald-Methode berechnet:
+```{r}
+confint_h1b
+```
+
+Die Kennzahlen der ANOVA können so angezeigt werden:
+```{r}
+anova_h1b
+rsq_1b
+```
+
+Paarweise Vergleiche mit einem Tukey-Test:
+```{r}
+summary(contr_h1b, test = adjusted("bonferroni"))
+confint(contr_h1b, level = 0.99)
+```
+
+### Hypothese 2a)
+
+Zur Überprüfung der zweiten Hypothese werden die Daten nach Subreddits aufgeteilt.
+
+```{r, eval = FALSE}
+NP <- reddit_df %>% filter(subreddit == "NeutralPolitics")
+TD <- reddit_df %>% filter(subreddit == "The_Donald")
+CON <- reddit_df %>% filter(subreddit == "Conservative")
+SFP <- reddit_df %>% filter(subreddit == "SandersForPresident")
+LSC <- reddit_df %>% filter(subreddit == "LateStageCapitalism")
+```
+
+
+Hypothese: Die moralischen Werte der Individualizing Foundation werden in den Gruppen des linken politischen Spektrums über die Dauer der aktiven Mitgliedschaft höher, während sie in den Gruppen des rechten politischen Spektrums über die Zeit sinken.  
+
+Die Hypothese lässt sowohl lineare, als auch kurvilineare Effekte zu, daher werden für jedes Subreddit beide möglichen Modelle getestet und anhand des AIC und BIC verglichen.
+```{r, eval = FALSE}
+NP_indi <- lmer (individualizing ~ timediff + (timediff | author), data = NP,
+                 control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+TD_indi <- lmer (individualizing ~ timediff + (timediff | author), data = TD,
+                 control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+CON_indi <- lmer (individualizing ~ timediff + (timediff | author), data = CON,
+                 control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+SFP_indi <- lmer (individualizing ~ timediff + (timediff | author), data = SFP,
+                 control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+LSC_indi <- lmer (individualizing ~ timediff + (timediff | author), data = LSC,
+                 control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary_NP_indi <- summary(NP_indi)
+conf_NP_indi <- confint.merMod(NP_indi, method = "Wald", level = 0.99)
+
+summary_TD_indi <- summary(TD_indi)
+conf_TD_indi <- confint.merMod(TD_indi, method = "Wald", level = 0.99)
+
+summary_CON_indi <- summary(CON_indi)
+conf_CON_indi <- confint.merMod(CON_indi, method = "Wald", level = 0.99)
+
+summary_SFP_indi <- summary(SFP_indi)
+conf_SFP_indi <- confint.merMod(SFP_indi, method = "Wald", level = 0.99)
+
+summary_LSC_indi <- summary(LSC_indi)
+conf_LSC_indi <- confint.merMod(LSC_indi, method = "Wald", level = 0.99)
+
+rsq_NP_indi <- r2(NP_indi)
+rsq_TD_indi <- r2(TD_indi)
+rsq_CON_indi <- r2(CON_indi)
+rsq_SFP_indi <- r2(SFP_indi)
+rsq_LSC_indi <- r2(LSC_indi)
+```
+
+```{r, eval = FALSE}
+NP_indi_poly <- lmer (individualizing ~ timediff + I(timediff^2) +(timediff + I(timediff^2)| author), data = NP,
+                 control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+TD_indi_poly <- lmer (individualizing ~ timediff + I(timediff^2) +(timediff + I(timediff^2)| author), data = TD,
+                 control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+CON_indi_poly <- lmer (individualizing ~ timediff + I(timediff^2) +(timediff + I(timediff^2)| author), data = CON,
+                  control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+SFP_indi_poly <- lmer (individualizing ~ timediff + I(timediff^2) +(timediff + I(timediff^2)| author), data = SFP,
+                  control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+LSC_indi_poly <- lmer (individualizing ~ timediff + I(timediff^2) +(timediff + I(timediff^2)| author), data = LSC,
+                  control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary_NP_indi_poly <- summary(NP_indi_poly)
+conf_NP_indi_poly <- confint.merMod(NP_indi_poly, method = "Wald", level = 0.99)
+
+summary_TD_indi_poly <- summary(TD_indi_poly)
+conf_TD_indi_poly <- confint.merMod(TD_indi_poly, method = "Wald", level = 0.99)
+
+summary_CON_indi_poly <- summary(CON_indi_poly)
+conf_CON_indi_poly <- confint.merMod(CON_indi_poly, method = "Wald", level = 0.99)
+
+summary_SFP_indi_poly <- summary(SFP_indi_poly)
+conf_SFP_indi_poly <- confint.merMod(SFP_indi_poly, method = "Wald", level = 0.99)
+
+summary_LSC_indi_poly <- summary(LSC_indi_poly)
+conf_LSC_indi_poly <- confint.merMod(LSC_indi_poly, method = "Wald", level = 0.99)
+
+rsq_NP_indi_poly <- r2(NP_indi_poly)
+rsq_TD_indi_poly <- r2(TD_indi_poly)
+rsq_CON_indi_poly <- r2(CON_indi_poly)
+rsq_SFP_indi_poly <- r2(SFP_indi_poly)
+rsq_LSC_indi_poly <- r2(LSC_indi_poly)
+```
+
+```{r, eval = FALSE}
+comparison_NP_indi_models <- kable(anova(NP_indi, NP_indi_poly))
+comparison_TD_indi_models <- kable(anova(TD_indi, TD_indi_poly))
+comparison_CON_indi_models <- kable(anova(CON_indi, CON_indi_poly))
+comparison_SFP_indi_models <- kable(anova(SFP_indi, SFP_indi_poly))
+comparison_LSC_indi_models <- kable(anova(LSC_indi, LSC_indi_poly))
+```
+
+Ergebnisse in der Gruppe **Neutral_Politics**
+```{r}
+summary_NP_indi
+conf_NP_indi 
+rsq_NP_indi
+```
+
+```{r}
+summary_NP_indi_poly
+conf_NP_indi_poly
+rsq_NP_indi_poly
+```
+
+```{r}
+comparison_NP_indi_models
+```
+
+Ergebnisse in der Gruppe **TheDonald**
+```{r}
+summary_TD_indi
+conf_TD_indi
+rsq_TD_indi
+```
+
+```{r}
+summary_TD_indi_poly
+conf_TD_indi_poly
+rsq_TD_indi_poly
+```
+
+```{r}
+comparison_TD_indi_models
+```
+
+Ergebnisse in der Gruppe **Conservative**
+```{r}
+summary_CON_indi
+conf_CON_indi
+rsq_CON_indi
+```
+
+```{r}
+summary_CON_indi_poly
+conf_CON_indi_poly
+rsq_CON_indi_poly
+```
+
+```{r}
+comparison_CON_indi_models
+```
+
+Ergebnisse in der Gruppe **SandersForPresident**
+
+```{r}
+summary_SFP_indi
+conf_SFP_indi 
+rsq_SFP_indi
+```
+
+```{r}
+summary_SFP_indi_poly
+conf_SFP_indi_poly
+rsq_SFP_indi_poly
+```
+
+```{r}
+comparison_SFP_indi_models
+```
+
+Ergebnisse in der Gruppe **LateStageCapitalism**
+```{r}
+summary_LSC_indi
+conf_LSC_indi
+rsq_LSC_indi
+```
+
+```{r}
+summary_LSC_indi_poly
+conf_LSC_indi_poly
+rsq_LSC_indi_poly
+```
+
+```{r}
+comparison_LSC_indi_models
+```
+
+### Hypothese 2b)
+
+Hypothese: Die moralischen Werte der Binding Foundation werden in den Gruppen des rechten politischen Spektrums über die Dauer der aktiven Mitgliedschaft höher, während sie in den Gruppen des linken politischen Spektrums über die Zeit sinken. Auch hier wird sowohl für lineare, als auch für polynome Effekte getestet.  
+```{r, eval = FALSE}
+NP_bindi <- lmer (binding ~ timediff + (timediff | author), data = NP,
+                 control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+TD_bindi <- lmer (binding ~ timediff + (timediff | author), data = TD,
+                 control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+CON_bindi <- lmer (binding ~ timediff + (timediff | author), data = CON,
+                  control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+SFP_bindi <- lmer (binding ~ timediff + (timediff | author), data = SFP,
+                  control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+LSC_bindi <- lmer (binding ~ timediff + (timediff | author), data = LSC,
+                  control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary_NP_bindi <- summary(NP_bindi)
+conf_NP_bindi <- confint.merMod(NP_bindi, method = "Wald", level = 0.99)
+
+summary_TD_bindi <- summary(TD_bindi)
+conf_TD_bindi <- confint.merMod(TD_bindi, method = "Wald", level = 0.99)
+
+summary_CON_bindi <- summary(CON_bindi)
+conf_CON_bindi <- confint.merMod(CON_bindi, method = "Wald", level = 0.99)
+
+summary_SFP_bindi <- summary(SFP_bindi)
+conf_SFP_bindi <- confint.merMod(SFP_bindi, method = "Wald", level = 0.99)
+
+summary_LSC_bindi <- summary(LSC_bindi)
+conf_LSC_bindi <- confint.merMod(LSC_bindi, method = "Wald", level = 0.99)
+
+rsq_NP_bindi <- r2(NP_bindi)
+rsq_TD_bindi <- r2(TD_bindi)
+rsq_CON_bindi <- r2(CON_bindi)
+rsq_SFP_bindi <- r2(SFP_bindi)
+rsq_LSC_bindi <- r2(LSC_bindi)
+```
+
+```{r, eval = FALSE}
+NP_bindi_poly <- lmer (binding ~ timediff + (timediff + I(timediff^2)| author), data = NP,
+                  control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+TD_bindi_poly <- lmer (binding ~ timediff + (timediff + I(timediff^2)| author), data = TD,
+                  control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+CON_bindi_poly <- lmer (binding ~ timediff + (timediff + I(timediff^2)| author), data = CON,
+                   control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+SFP_bindi_poly <- lmer (binding ~ timediff + (timediff + I(timediff^2)| author), data = SFP,
+                   control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+LSC_bindi_poly <- lmer (binding ~ timediff + (timediff + I(timediff^2)| author), data = LSC,
+                   control = lmerControl (optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary_NP_bindi_poly <- summary(NP_bindi_poly)
+conf_NP_bindi_poly <- confint.merMod(NP_bindi_poly, method = "Wald", level = 0.99)
+
+summary_TD_bindi_poly <- summary(TD_bindi_poly)
+conf_TD_bindi_poly <- confint.merMod(TD_bindi_poly, method = "Wald", level = 0.99)
+
+summary_CON_bindi_poly <- summary(CON_bindi_poly)
+conf_CON_bindi_poly <- confint.merMod(CON_bindi_poly, method = "Wald", level = 0.99)
+
+summary_SFP_bindi_poly <- summary(SFP_bindi_poly)
+conf_SFP_bindi_poly <- confint.merMod(SFP_bindi_poly, method = "Wald", level = 0.99)
+
+summary_LSC_bindi_poly <- summary(LSC_bindi_poly)
+conf_LSC_bindi_poly <- confint.merMod(LSC_bindi_poly, method = "Wald", level = 0.99)
+
+rsq_NP_bindi_poly <- r2(NP_bindi_poly)
+rsq_TD_bindi_poly <- r2(TD_bindi_poly)
+rsq_CON_bindi_poly <- r2(CON_bindi_poly)
+rsq_SFP_bindi_poly <- r2(SFP_bindi_poly)
+rsq_LSC_bindi_poly <- r2(LSC_bindi_poly)
+```
+
+```{r, eval = FALSE}
+comparison_NP_bindi_models <- kable(anova(NP_bindi, NP_bindi_poly))
+comparison_TD_bindi_models <- kable(anova(TD_bindi, TD_bindi_poly))
+comparison_CON_bindi_models <- kable(anova(CON_bindi, CON_bindi_poly))
+comparison_SFP_bindi_models <- kable(anova(SFP_bindi, SFP_bindi_poly))
+comparison_LSC_bindi_models <- kable(anova(LSC_bindi, LSC_bindi_poly))
+```
+
+Ergebnisse in der Gruppe **Neutral\_Politics**
+```{r}
+summary_NP_bindi
+conf_NP_bindi
+rsq_NP_bindi
+```
+
+```{r}
+summary_NP_bindi_poly
+conf_NP_bindi_poly
+rsq_NP_bindi_poly
+```
+
+```{r}
+comparison_NP_bindi_models
+```
+
+Ergebnisse in der Gruppe **TheDonald**
+```{r}
+summary_TD_bindi
+conf_TD_bindi
+rsq_TD_bindi
+```
+
+```{r}
+summary_TD_bindi_poly
+conf_TD_bindi_poly
+rsq_TD_bindi_poly
+```
+
+```{r}
+comparison_TD_bindi_models
+```
+
+Ergebnisse in der Gruppe **Conservative**
+```{r}
+summary_CON_bindi
+conf_CON_bindi 
+rsq_CON_bindi
+```
+
+```{r}
+summary_CON_bindi_poly
+conf_CON_bindi_poly
+rsq_CON_bindi_poly
+```
+
+```{r}
+comparison_CON_bindi_models
+```
+
+Ergebnisse in der Gruppe **SandersForPresident**
+```{r}
+summary_SFP_bindi
+conf_SFP_bindi
+rsq_SFP_bindi
+```
+
+```{r}
+summary_SFP_bindi_poly
+conf_SFP_bindi_poly
+rsq_SFP_bindi_poly
+```
+
+```{r}
+comparison_SFP_bindi_models
+```
+
+Ergebnisse in der Gruppe **LateStageCapitalism**
+```{r}
+summary_LSC_bindi
+conf_LSC_bindi
+rsq_LSC_bindi
+```
+
+```{r}
+summary_LSC_bindi_poly
+conf_LSC_bindi_poly
+rsq_LSC_bindi_poly
+```
+
+```{r}
+comparison_LSC_bindi_models
+```

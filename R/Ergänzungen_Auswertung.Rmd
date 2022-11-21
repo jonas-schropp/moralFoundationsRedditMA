@@ -1,0 +1,53 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+load(file.choose())
+load(file.choose())
+```
+
+```{r}
+rsq_1a <- r2(hyp_1a)
+rsq_1b <- r2(hyp_1b)
+
+conf_h1a <- confint.merMod(hyp_1a, method = "Wald", level = 0.99)
+conf_h1b <- confint.merMod(hyp_1b, method = "Wald", level = 0.99)
+```
+
+
+```{r}
+rsq_NP_indi <- r2(NP_indi)
+rsq_TD_indi <- r2(TD_indi)
+rsq_CON_indi <- r2(CON_indi)
+rsq_SFP_indi <- r2(SFP_indi)
+rsq_LSC_indi <- r2(LSC_indi)
+
+conf_NP_indi <- confint.merMod(NP_indi, method = "Wald", level = 0.99)
+conf_TD_indi <- confint.merMod(TD_indi, method = "Wald", level = 0.99)
+conf_CON_indi <- confint.merMod(CON_indi, method = "Wald", level = 0.99)
+conf_SFP_indi <- confint.merMod(SFP_indi, method = "Wald", level = 0.99)
+conf_LSC_indi <- confint.merMod(LSC_indi, method = "Wald", level = 0.99)
+
+rsq_NP_bindi <- r2(NP_bindi)
+rsq_TD_bindi <- r2(TD_bindi)
+rsq_CON_bindi <- r2(CON_bindi)
+rsq_SFP_bindi <- r2(SFP_bindi)
+rsq_LSC_bindi <- r2(LSC_bindi)
+
+conf_NP_bindi <- confint.merMod(NP_bindi, method = "Wald", level = 0.99)
+conf_TD_bindi <- confint.merMod(TD_bindi, method = "Wald", level = 0.99)
+conf_CON_bindi <- confint.merMod(CON_bindi, method = "Wald", level = 0.99)
+conf_SFP_bindi <- confint.merMod(SFP_bindi, method = "Wald", level = 0.99)
+conf_LSC_bindi <- confint.merMod(LSC_bindi, method = "Wald", level = 0.99)
+```
+
+```{r}
+save(rsq_1a, rsq_1b, conf_h1a, conf_h1b, rsq_NP_indi, rsq_TD_indi, rsq_CON_indi, rsq_SFP_indi, 
+     rsq_LSC_indi, conf_NP_indi, conf_TD_indi, conf_CON_indi, conf_SFP_indi, conf_LSC_indi, 
+     rsq_NP_bindi, rsq_TD_bindi, rsq_CON_bindi, rsq_SFP_bindi, rsq_LSC_bindi, conf_NP_bindi,
+     conf_TD_bindi, conf_CON_bindi, conf_SFP_bindi, conf_LSC_bindi, file = "2018_11_26_Ergänzungen_Datenauswertung.RData")
+```
+
+

@@ -1,0 +1,468 @@
+---
+title: "Plots für Masterarbeit"
+output: html_notebook
+---
+
+```{r, message = FALSE}
+library (readr)
+library (dplyr)
+library (text2vec)
+library (ggplot2)
+library (ggwordcloud)
+library (jtools)
+library (scales)
+library (dotwhisker)
+```
+
+```{r}
+load(file.choose())
+```
+
+```{r}
+indie_matrix <- t(as.matrix(individualizing_foundation))
+sim_indie = sim2(x = reddit_glove_vectors, 
+                 y = indie_matrix, 
+                 method = "cosine", 
+                 norm = "l2")
+sim_indie <- as.data.frame(head(sort(sim_indie[,1], decreasing = TRUE), 50))
+sim_indie$value <- sim_indie[,1]*100
+sim_indie$word <- row.names(sim_indie)
+```
+
+```{r}
+sim_indie <- sim_indie %>%
+  mutate(angle = 90 * sample(c(0, 1), n(), replace = TRUE, prob = c(70, 30)))
+
+indie_plot <- ggplot(sim_indie, aes(label = word, size = value, angle = angle)) +
+                      geom_text_wordcloud() +
+                      theme_minimal() 
+
+ggsave("test.tiff", units="in", width=5, height=4, dpi=300, compression = 'lzw')
+```
+
+```{r}
+bindie_matrix <- t(as.matrix(binding_foundation))
+sim_bindie = sim2(x = reddit_glove_vectors, 
+                  y = bindie_matrix, 
+                  method = "cosine", 
+                  norm = "l2")
+sim_bindie <- as.data.frame(head(sort(sim_bindie[,1], decreasing = TRUE), 50))
+sim_bindie$value <- sim_bindie[,1]*100
+sim_bindie$word <- row.names(sim_bindie)
+```
+
+```{r}
+sim_bindie <- sim_bindie %>%
+  mutate(angle = 90 * sample(c(0, 1), n(), replace = TRUE, prob = c(70, 30)))
+
+bindie_plot <- ggplot(sim_bindie, 
+                      aes(label = word, size = value, angle = angle)) +
+                      geom_text_wordcloud() +
+                      theme_minimal() 
+
+ggsave("test.tiff", units="in", width=5, height=4, dpi=300, compression = 'lzw')
+```
+
+################################################################################
+
+```{r}
+authors_df <- read_rds(file.choose())
+```
+
+```{r}
+glimpse(authors_df)
+```
+
+```{r}
+authors_df$subreddit <- factor(
+  authors_df$subreddit, 
+  levels = c("LateStageCapitalism", "SandersForPresident", 
+             "NeutralPolitics", "Conservative", "The_Donald"))
+```
+
+INDIVIDUALIZING FOUNDATION
+
+```{r}
+windowsFonts(Times=windowsFont("Times New Roman"))
+
+hist_indie <- ggplot(authors_df, aes(x = subreddit, y = individualizing)) +
+                    geom_boxplot (outlier.size = 0.005) +
+                    theme_apa () +
+                    xlab("Subreddit") +
+                    ylab("Individualizing Foundation") +
+                    theme(
+                          text=element_text(
+                            family="Times", face="bold", size=12
+                            ),
+                          axis.title.y = element_text(
+                            margin = margin(t = 0, r = 20, b = 0, l = 0)
+                            ),
+                          axis.title.x = element_text(
+                            margin = margin(t = 20, r = 0, b = 0, l = 0)
+                            )
+                          ) +
+                    coord_flip()
+
+hist_indie
+
+# ggsave("test.tiff", units="in", width=8, height=4, dpi=300, compression = 'lzw')
+```
+
+BINDING FOUNDATION
+
+```{r}
+windowsFonts(Times=windowsFont("Times New Roman"))
+
+hist_bindie <- ggplot(authors_df, aes(x = subreddit, y = binding)) +
+                    geom_boxplot (outlier.size = 0.005) +
+                    theme_apa () +
+                    xlab("Subreddit") +
+                    ylab("Binding Foundation") +
+                    theme(
+                          text=element_text(
+                            family="Times", face="bold", size=12
+                            ),
+                          axis.title.y = element_text(
+                            margin = margin(t = 0, r = 20, b = 0, l = 0)
+                            ),
+                          axis.title.x = element_text(
+                            margin = margin(t = 20, r = 0, b = 0, l = 0)
+                            )
+                          ) +
+                    coord_flip()
+
+hist_bindie
+
+# ggsave("test.tiff", units="in", width=8, height=4, dpi=300, compression = 'lzw')
+```
+
+ANZAHL AN KOMMENTAREN
+
+```{r}
+windowsFonts(Times=windowsFont("Times New Roman"))
+
+violin_comments <- ggplot(authors_df, aes(x = subreddit, y = n_comments)) +
+                          geom_violin(scale = "area") + 
+                          theme_apa () +
+                          xlab("Subreddit") +
+                          ylab("Anzahl an Kommentaren (log10)") +
+                          theme(
+                            text=element_text(
+                              family="Times", face="bold", size=12
+                              ),
+                            axis.title.y = element_text(
+                              margin = margin(t = 0, r = 20, b = 0, l = 0)
+                              ),
+                            axis.title.x = element_text(
+                              margin = margin(t = 20, r = 0, b = 0, l = 0)
+                              )
+                            ) +
+                          scale_y_log10(
+                            breaks=c(10, 100, 1000, 10000),
+                            labels=c(10, 100, 1000, 10000)
+                            ) +
+                          coord_flip() 
+  
+violin_comments
+
+ggsave("test.tiff", units="in", width=8, height=4, dpi=300, compression = 'lzw')
+```
+
+DAUER DER MITGLIEDSCHAFT - NO GOOD
+
+```{r}
+windowsFonts(Times=windowsFont("Times New Roman"))
+
+violin_timespan <- ggplot(authors_df, aes(x = subreddit, y = timespan)) +
+                          geom_violin(scale = "area") + 
+                          theme_apa () +
+                          xlab("Subreddit") +
+                          ylab("Zeitspanne zwischen erstem und letztem Kommentar") +
+                          theme(
+                            text=element_text(
+                              family="Times", face="bold", size=12
+                              ),
+                            axis.title.y = element_text(
+                              margin = margin(t = 0, r = 20, b = 0, l = 0)
+                              ),
+                            axis.title.x = element_text(
+                              margin = margin(t = 20, r = 0, b = 0, l = 0)
+                              )
+                            ) +
+                          coord_flip() 
+  
+violin_timespan
+
+ggsave("test.tiff", units="in", width=8, height=4, dpi=300, compression = 'lzw')
+```
+
+################################################################################
+
+```{r}
+df <- read_rds(file.choose()) %>%
+  group_by (author) %>%
+  summarize (starting_date = min(created_utc))
+```
+
+```{r}
+library (lubridate)
+
+authors_df <- authors_df %>%
+  left_join(df, by = "author")
+
+authors_df$starting_date <- as_datetime(authors_df$starting_date)
+
+glimpse(authors_df)
+```
+
+```{r}
+windowsFonts(Times=windowsFont("Times New Roman"))
+
+starting_X_timespan <- ggplot(authors_df, 
+                              aes(x = starting_date, y = timespan)
+                              ) +
+                          geom_hex(bins = 20, color = "white")+
+                          scale_fill_gradient(low =  "lightgray", high = "black") + 
+                          theme_apa () +
+                          facet_grid(subreddit ~ .) +
+                          xlab("Zeitpunkt des ersten Kommentars") +
+                          ylab("Zeitspanne zwischen erstem und letztem Kommentar (Jahre)") +
+                          theme(
+                            text=element_text(
+                              family="Times", face="bold", size=12
+                              ),
+                            axis.title.y = element_text(
+                              margin = margin(t = 0, r = 20, b = 0, l = 0)
+                              ),
+                            axis.title.x = element_text(
+                              margin = margin(t = 20, r = 0, b = 0, l = 0)
+                              )
+                            ) 
+  
+starting_X_timespan
+
+ggsave("test.tiff", units="in", width=8, height=10, dpi=300, compression = 'lzw')
+```
+
+```{r}
+windowsFonts(Times=windowsFont("Times New Roman"))
+
+starting_dens <- ggplot(authors_df, aes(x = starting_date, fill = subreddit, alpha = 0.6)) +
+                          geom_density () +
+                          theme_apa () +
+                          xlab("Zeitpunkt des ersten Kommentars") +
+                          theme(
+                            text=element_text(
+                              family="Times", face="bold", size=12
+                              ),
+                            axis.title.y = element_text(
+                              margin = margin(t = 0, r = 20, b = 0, l = 0)
+                              ),
+                            axis.title.x = element_text(
+                              margin = margin(t = 20, r = 0, b = 0, l = 0)
+                              )
+                            ) +
+                          scale_fill_brewer(palette = "Blues")
+  
+starting_dens
+
+ggsave("test.tiff", units="in", width=8, height=10, dpi=300, compression = 'lzw')
+```
+
+################################################################################
+
+```{r}
+term <- factor(c("(Intercept)", "LateStageCapitalism", "SandersForPresident", 
+                 "NeutralPolitics", "Conservative", "The_Donald"))
+estimate <- c(0, 0.38833, 0.35773, 0.4327, 0.41032, 0.3167)
+conf.low <- c(0, 0.3857227, 0.3552646, 0.4303563, 0.4077069, 0.314352)
+conf.high <- c(0, 0.3909402, 0.3601916, 0.4350424, 0.4129378, 0.3191095)
+
+tidy_indi <- tibble(term, estimate, conf.low, conf.high)
+```
+
+```{r}
+windowsFonts(Times=windowsFont("Times New Roman"))
+
+dwplot(tidy_indi) +
+  theme_apa () +
+  xlab("Individualizing Foundation") +
+  theme(text=element_text(family="Times", face="bold", size=16),
+        axis.title.x = element_text(margin = margin(t = 20, r = 0, b = 0, l = 0), 
+                                    family="Times", face="bold", size=16)) +
+  scale_x_continuous(breaks=c(0.325, 0.35, 0.375, 0.40, 0.425),
+                     labels=c(0.325, 0.35, 0.375, 0.40, 0.425)) +
+  theme(legend.title = element_text(""), legend.text = element_text("")) +
+  scale_colour_grey(start = 0, end = 0)
+
+ggsave("test.tiff", units="in", width=8, height=4, dpi=300, compression = 'lzw')
+```
+
+```{r}
+term <- factor(c("(Intercept)", "LateStageCapitalism", "SandersForPresident", 
+                 "NeutralPolitics", "Conservative", "The_Donald"))
+estimate <- c(0, 0.26816, 0.25251, 0.2892, 0.29187, 0.25104)
+conf.low <- c(0, 0.26650, 0.25094, 0.28767, 0.29020, 0.24953)
+conf.high <- c(0, 0.26982, 0.25407, 0.29064, 0.293535, 0.25255)
+
+tidy_bindi <- tibble(term, estimate, conf.low, conf.high)
+```
+
+```{r}
+windowsFonts(Times=windowsFont("Times New Roman"))
+
+dwplot(tidy_bindi) +
+  theme_apa () +
+  xlab("Binding Foundation") +
+  theme(text=element_text(family="Times", face="bold", size=16),
+  axis.title.x = element_text(margin = margin(t = 20, r = 0, b = 0, l = 0), 
+                              family="Times", face="bold", size=16)) +
+  scale_colour_grey(start = 0, end = 0)
+
+ggsave("test.tiff", units="in", width=8, height=4, dpi=300, compression = 'lzw')
+```
+
+
+################################################################################
+
+```{r}
+LateStageCapitalism <- function(x){0.39 - 0.014*x + 0.0072*x^2}
+SandersForPresident <- function(x){0.3571 - 0.009573*x + 0.01222*x^2}
+NeutralPolitics <- function(x){0.4364 - 0.0061*x}
+Conservative <- function(x){0.4132 - 0.01135*x + 0.001664*x^2}
+The_Donald <- function(x){0.3172 - 0.01082*x + 0.009497*x^2}
+
+
+df <- data.frame(x = rep(c(0,10), 5), 
+                 subreddit = c("LSC", "LSC",
+                               "SFP", "SFP",
+                               "NP", "NP",
+                               "CON", "CON",
+                               "TD", "TD"))
+df$subreddit <- factor(df$subreddit, 
+                       levels = c("LSC", "SFP", "NP", "CON", "TD"))
+```
+
+```{r}
+windowsFonts(Times=windowsFont("Times New Roman"))
+
+
+plot_h2a <- ggplot(df, aes(x)) +
+  facet_grid(subreddit ~.) +
+  theme_apa() +
+  stat_function(fun = LateStageCapitalism, 
+                xlim = c(0, 2.83), 
+                data = subset(df, subreddit == "LSC"), 
+                size = 0.75, linetype = "dotdash") +
+  
+  stat_function(fun = SandersForPresident, 
+                xlim = c(0, 4.53), 
+                data = subset(df, subreddit == "SFP"), 
+                size = 0.75, linetype = "dotdash") +
+  
+  stat_function(fun = NeutralPolitics, 
+                xlim = c(0, 6.37), 
+                data = subset(df, subreddit == "NP"), 
+                size = 0.75, linetype = "dotdash") +
+  
+  stat_function(fun = Conservative, 
+                xlim = c(0, 8.45), 
+                data = subset(df, subreddit == "CON"), 
+                size = 0.75, linetype = "dotdash") +
+  
+  stat_function(fun = The_Donald, 
+                xlim = c(0, 2.697 ), 
+                data = subset(df, subreddit == "TD"), 
+                size = 0.75, linetype = "dotdash") +
+  
+  xlab("DAM (in Jahren)") +
+  ylab("Individualizing Foundation") +
+  
+  scale_y_continuous(breaks = c(0.30, 0.35, 0.40, 0.45, 0.50, 0.55), 
+                     labels = c(0.30, 0.35, 0.40, 0.45, 0.50, 0.55),
+                     limits = c(0.30, 0.55)) +
+  scale_x_continuous(limits = c(0, 8.5),
+                     labels = c(1, 2, 3, 4, 5, 6, 7, 8, 9),
+                     breaks = c(1, 2, 3, 4, 5, 6, 7, 8, 9)) +
+  
+  theme(text=element_text(family="Times", face="bold", size=12),
+  axis.title.x = element_text(margin = margin(t = 20, r = 0, b = 0, l = 0), 
+                              family="Times", face="bold", size=14),
+  axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 20), 
+                              family="Times", face="bold", size=14))
+
+plot_h2a  
+ggsave("resultsPlotH2a.tiff", units="in", width=10, height=8, dpi=300, compression = 'lzw')
+```
+
+
+```{r}
+LateStageCapitalism <- function(x){0.2689 - 0.005154*x + 0.002676*x^2}
+SandersForPresident <- function(x){0.2506 + 0.002651*x + 0.004655*x^2}
+NeutralPolitics <- function(x){0.2909 - 0.00301*x}
+Conservative <- function(x){0.2931 - 0.004954*x + 0.0007487*x^2}
+The_Donald <- function(x){0.2507 - 0.001824*x + 0.002213*x^2}
+
+df <- data.frame(x = rep(c(0,10), 5), 
+                 subreddit = c("LSC", "LSC",
+                               "SFP", "SFP",
+                               "NP", "NP",
+                               "CON", "CON",
+                               "TD", "TD"))
+df$subreddit <- factor(df$subreddit, levels = c("LSC", "SFP", "NP", "CON", "TD"))
+```
+
+```{r}
+windowsFonts(Times=windowsFont("Times New Roman"))
+
+
+plot_h2b <- ggplot(df, aes(x)) +
+  facet_grid(subreddit ~.) +
+  theme_apa() +
+  stat_function(fun = LateStageCapitalism, 
+                xlim = c(0, 2.83), 
+                data = subset(df, subreddit == "LSC"), 
+                size = 0.75, linetype = "dotdash") +
+  
+  stat_function(fun = SandersForPresident, 
+                xlim = c(0, 4.53), 
+                data = subset(df, subreddit == "SFP"), 
+                size = 0.75, linetype = "dotdash") +
+  
+  stat_function(fun = NeutralPolitics, 
+                xlim = c(0, 6.37), 
+                data = subset(df, subreddit == "NP"), 
+                size = 0.75, linetype = "dotdash") +
+  
+  stat_function(fun = Conservative, 
+                xlim = c(0, 8.45), 
+                data = subset(df, subreddit == "CON"), 
+                size = 0.75, linetype = "dotdash") +
+  
+  stat_function(fun = The_Donald, 
+                xlim = c(0, 2.697 ), 
+                data = subset(df, subreddit == "TD"), 
+                size = 0.75, linetype = "dotdash") +
+  
+  xlab("DAM (in Jahren)") +
+  ylab("Binding Foundation") +
+  
+  scale_y_continuous(breaks = c(0.25, 0.30, 0.35, 0.40), 
+                     labels = c(0.25, 0.30, 0.35, 0.40),
+                     limits = c(0.25, 0.40)) +
+  scale_x_continuous(limits = c(0, 8.5),
+                     labels = c(1, 2, 3, 4, 5, 6, 7, 8, 9),
+                     breaks = c(1, 2, 3, 4, 5, 6, 7, 8, 9)) +
+  
+  theme(text=element_text(family="Times", face="bold", size=12),
+  axis.title.x = element_text(margin = margin(t = 20, r = 0, b = 0, l = 0), 
+                              family="Times", face="bold", size=14),
+  axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 20), 
+                              family="Times", face="bold", size=14))
+
+plot_h2b  
+ggsave("resultsPlotH2b.tiff", units="in", width=10, height=8, dpi=300, compression = 'lzw')
+```
+
+
+
