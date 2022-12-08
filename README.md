@@ -1,7 +1,7 @@
 # moralFoundationsRedditMA
 
 Repository for my master's thesis "Die Moral Foundations Theory im Kontext politischer 
-Online-Diskussionsforen Eine Untersuchung zu Gruppendifferenzen und Stabilität intuitiver
+Online-Diskussionsforen: Eine Untersuchung zu Gruppendifferenzen und Stabilität intuitiver
 moralischer Grundwerte" in psychology at the University of Innsbruck (2019). 
 </br>
 </br>
